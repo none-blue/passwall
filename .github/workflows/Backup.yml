@@ -1,0 +1,113 @@
+name: Backup
+on:
+  schedule:
+    - cron: "10 10 1-31/2 * *"
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clean up
+        run: |
+            rm -fr *
+            # https://github.com/actions/virtual-environments/blob/main/images/linux/Ubuntu2004-README.md
+            # clean up to get enough disk
+            sudo rm -rf /usr/local/lib/android # will release about 10 GB if you don't need Android
+            sudo rm -rf /usr/share/dotnet # will release about 20GB if you don't need .NET
+            sudo apt update -qqy
+            sudo apt-get -yqq install build-essential asciidoc binutils bzip2 curl gawk gettext git libncurses5-dev libz-dev patch python3.5 python2.7 unzip zlib1g-dev lib32gcc1 libc6-dev-i386 subversion flex uglifyjs git-core gcc-multilib p7zip p7zip-full msmtp libssl-dev texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake libtool autopoint device-tree-compiler g++-multilib antlr3 gperf
+            sudo apt -yqq autoremove --purge
+            sudo apt clean -yqq
+            df -h
+      - name: Git clone and set custom config
+        run: |
+            git clone https://github.com/Lienol/openwrt > /dev/null;cd openwrt
+            #sed -i 's/#src-git helloworld/src-git helloworld/g' ./feeds.conf.default
+            echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall.git" >> feeds.conf.default
+            echo "src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git" >> feeds.conf.default
+            ./scripts/feeds clean;./scripts/feeds update -a;./scripts/feeds install -a
+      - name: make download
+        run: |
+            cd openwrt
+            cat <<EOF > .config
+            CONFIG_TARGET_x86=y
+            CONFIG_TARGET_x86_64=y
+            CONFIG_TARGET_x86_64_DEVICE_generic=y
+            CONFIG_EXPERIMENTAL=y
+            # CONFIG_GRUB_IMAGES is not set
+            CONFIG_PACKAGE_coreutils=y
+            CONFIG_PACKAGE_coreutils-base64=y
+            CONFIG_PACKAGE_coreutils-nohup=y
+            # CONFIG_PACKAGE_etherwake is not set
+            CONFIG_PACKAGE_hysteria=y
+            CONFIG_PACKAGE_ip-full=y
+            CONFIG_PACKAGE_ip6tables-mod-nat=y
+            # CONFIG_PACKAGE_iptables-mod-filter is not set
+            # CONFIG_PACKAGE_kmod-ipt-filter is not set
+            CONFIG_PACKAGE_kmod-ipt-nat6=y
+            # CONFIG_PACKAGE_kmod-lib-textsearch is not set
+            CONFIG_PACKAGE_kmod-nf-nat6=y
+            # CONFIG_PACKAGE_kmod-usb-printer is not set
+            CONFIG_PACKAGE_libbpf=y
+            # CONFIG_PACKAGE_libcap-ng is not set
+            CONFIG_PACKAGE_libelf=y
+            # CONFIG_PACKAGE_luci-app-control-timewol is not set
+            # CONFIG_PACKAGE_luci-app-control-webrestriction is not set
+            # CONFIG_PACKAGE_luci-app-control-weburl is not set
+            # CONFIG_PACKAGE_luci-app-ddns is not set
+            # CONFIG_PACKAGE_luci-app-diskman_INCLUDE_btrfs_progs is not set
+            # CONFIG_PACKAGE_luci-app-diskman_INCLUDE_lsblk is not set
+            CONFIG_PACKAGE_luci-app-passwall2=y
+            CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Hysteria=y
+            CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_IPv6_Nat=y
+            # CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_ShadowsocksR_Libev_Client is not set
+            # CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Shadowsocks_Libev_Client is not set
+            # CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Simple_Obfs is not set
+            # CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_V2ray_Plugin is not set
+            # CONFIG_PACKAGE_luci-app-ramfree is not set
+            # CONFIG_PACKAGE_luci-app-timecontrol is not set
+            # CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_BBR_CCA is not set
+            # CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_SHORTCUT_FE is not set
+            # CONFIG_PACKAGE_luci-app-unblockmusic_INCLUDE_UnblockNeteaseMusic_Go is not set
+            # CONFIG_PACKAGE_luci-app-upnp is not set
+            # CONFIG_PACKAGE_luci-app-usb-printer is not set
+            # CONFIG_PACKAGE_luci-app-vsftpd is not set
+            # CONFIG_PACKAGE_luci-app-wol is not set
+            CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y
+            # CONFIG_PACKAGE_luci-lib-ipkg is not set
+            # CONFIG_PACKAGE_miniupnpd is not set
+            # CONFIG_PACKAGE_p910nd is not set
+            CONFIG_PACKAGE_resolveip=y
+            CONFIG_PACKAGE_tcping=y
+            CONFIG_PACKAGE_unzip=y
+            CONFIG_PACKAGE_v2ray-geoip=y
+            CONFIG_PACKAGE_v2ray-geosite=y
+            # CONFIG_PACKAGE_vsftpd-alt is not set
+            CONFIG_PACKAGE_xray-core=y
+            # CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING is not set 
+            EOF
+            
+            make defconfig
+            make download -j 3
+      - name: compile
+        run: |
+            cd openwrt
+            make -j 9
+            df -h
+      - name: upload img
+        run: |
+            7z -v20m a img-$(date +"%m-%d-%Y").7z ./openwrt/bin/targets/x86/64/*efi.img.gz
+            rm -rf openwrt
+            mkdir -p .github/workflows
+            wget -qO .github/workflows/Backup.yml https://github.com/${{ github.repository }}/raw/main/.github/workflows/Backup.yml &> /dev/null
+            git config --global init.defaultBranch main
+            git init
+            git add .
+            git config user.name "Scaleya"
+            git config user.email "61817665+Scaleya@users.noreply.github.com"
+            git commit -m "openwrt passwall amd64 img"
+            git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+            git push origin main --force
